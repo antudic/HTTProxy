@@ -24,23 +24,14 @@ def createSQLiteTable():
     print(res.fetchall())
 
 
-def addProxy(proxy: str):
-    # make sure the proxy is valid
-    if not (pattern.match(proxy)):
-        raise InvalidProxyError(f"\"{proxy}\" is not a valid proxy")
-
-    # make sure the proxy does not already exist
-    res = db.execute(py2sqlite.select("proxies", {"address": f"'{proxy}'"}))
-
-    if len(res.fetchall()):
-        raise ProxyAlreadyExistsError(f"Proxy \"{proxy}\" already exists!")
-
-    # make sure the proxy actually works
+def checkProxy(proxy: str):
+    # send a request to reliable website
     try: 
         startTime = time.time()
         r = requests.get("https://catfact.ninja/fact", proxies={"http": proxy})
         latency = time.time() - startTime
 
+    # reject these errors, idk what to do about them
     except (
         requests.exceptions.ConnectionError,
         requests.exceptions.MissingSchema,
@@ -58,9 +49,32 @@ def addProxy(proxy: str):
         ):
         raise InvalidProxyDataError(f"Proxy \"{proxy}\" gave faulty data: {r.text}")
 
+    # make sure that the proxy isn't a transparent proxy, we don't like those
     if "Via" in r.headers:
-        # this means that the proxy is a transparent proxy, we don't like those
         raise TransparentProxyError(f"Proxy \"{proxy}\" is a transparent proxy")
 
+
+def addProxy(proxy: str):
+    # make sure the proxy is valid
+    if not (pattern.match(proxy)):
+        raise InvalidProxyError(f"\"{proxy}\" is not a valid proxy")
+
+    # make sure the proxy does not already exist
+    res = db.execute(py2sqlite.select("proxies", {"address": f"'{proxy}'"}))
+
+    if len(res.fetchall()):
+        raise ProxyAlreadyExistsError(f"Proxy \"{proxy}\" already exists!")
+
+    # make sure the proxy is actually up and running
+    checkProxy(proxy)
+
     # everything looks good, we add it to the thing
-    query = py2sqlite.insert("cold", {"address": proxy, })
+    query = py2sqlite.insert("cold", {"address": proxy, "latency": latency})
+
+
+def checkProxyLoop():
+    # create new connection in case it runs threaded
+    db = sqlite3.connect("cold.db")
+
+    while True: 
+        query = "SELECT * FROM cold WHERE "
