@@ -13,7 +13,15 @@ class TransparentProxyError(BaseException): pass
 class ProxyAlreadyExistsError(BaseException): pass
 
 
-def createSQLiteTable():
+def SQLstr(value) -> str:
+    """Convert from input "value" to "'value'" """
+    return "'" + value + "'"
+    # doing this is faster than using an f-string
+    # Don't believe me? Check this out -> https://pastebin.com/yM62Hprv
+
+
+def createSQLiteTable() -> sqlite3.Cursor:
+    """Initialize the "cold" table"""
     query = py2sqlite.createTable("cold", {
         "address": "TEXT",
         "latency": "INT",
@@ -22,8 +30,29 @@ def createSQLiteTable():
         "retries": "INT DEFAULT 0",
         "successes": "INT DEFAULT 0",
         "fails": "INT DEFAULT 0",
+        "reliability": "INT DEFAULT 1"
     })
-    res = db.execute(query)
+    return db.execute(query)
+
+
+def createReliabilityTrigger() -> None:
+    """Create a trigger to automatically update the reliability parameter"""
+
+    query = (
+        """
+        CREATE TRIGGER update_reliability
+        AFTER UPDATE OF successes, fails ON cold
+        FOR EACH ROW
+        BEGIN
+            UPDATE cold
+            SET reliability = NEW.successes / (NEW.successes + NEW.fails)
+            WHERE address = NEW.address;
+        END;
+        """
+    ) # credit: ChatGPT
+
+    db.execute(query)
+    db.commit()
 
 
 def checkProxy(proxy: str) -> float:
@@ -63,7 +92,9 @@ def checkProxy(proxy: str) -> float:
     return latency
 
 
-def addProxy(proxy: str):
+def addProxy(proxy: str) -> None:
+    """Add a proxy to the database"""
+
     # make sure the proxy is valid
     if not (pattern.match(proxy)):
         raise InvalidProxyError(f"\"{proxy}\" is not a valid proxy")
@@ -83,7 +114,7 @@ def addProxy(proxy: str):
     db.commit()
 
 
-def recheckProxy(dbProxy, instance=None):
+def recheckProxy(dbProxy, instance=None) -> None:
     """Check if a proxy works and update its values"""
 
     # set db to be instance or global db
@@ -91,32 +122,32 @@ def recheckProxy(dbProxy, instance=None):
 
     # check proxy
     try:
-        latency = checkProxy(proxy)
+        latency = checkProxy(dbProxy)
         # ^ if we get past this, it works.
         
         lastUsed = int(time.time())
         query = py2sqlite.update(
             "cold", 
             {"latency": latency, "lastUsed": lastUsed, "working": 1, "retries": 0, "successes": dbProxy[5]+1}, 
-            {"address": dbProxy[0]}
+            {"address": SQLstr(dbProxy[0])}
             )
         db.execute(query)
         # we intentionally don't call db.commit here
-        print("Recomissioned proxy", dbProxy[0])
+        print("Recommissioned proxy", dbProxy[0])
 
     except Exception:
         # the proxy does not work
         query = py2sqlite.update(
             "cold", 
             {"retries": dbProxy[4]+1, "fails": dbProxy[5]+1}, 
-            {"address": dbProxy[0]}
+            {"address": SQLstr(dbProxy[0])}
             )
             
         db.execute(query)
         # we intentionally don't call db.commit here
 
 
-def checkProxyLoop():
+def checkProxyLoop() -> None:
     # create new connection in case it runs threaded
     db = sqlite3.connect("cold.db")
 
