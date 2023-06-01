@@ -1,1 +1,30 @@
 Install: pip install -r requirements.txt
+
+SQLite DB: 
+    Every proxy.
+    Proxy ip address + port: (string presumably)
+    isWorking: (bool/bit) 
+    lastChecked: datetime
+
+Redis: 
+    Every isWorking Proxy.
+    Proxy ip address + port: (string presumably)
+    lastUsed: timestamp
+    lock: (bool/bit) <- indicates if it's currently being used
+    latency: int (ms)
+
+Application (program):
+    Passive thread:
+        Go through the SQLite proxies and re-check proxies that do not work
+        Move working proxies to the Redis DB
+
+    Active thread:
+        Make requests using an appropriate proxy
+            Updating the lastUsed timestamp, lock, and latency
+        Remove proxies from the Redis DB and update the SQLite entry to isWorking=false
+
+1. main.py
+2. passive.py
+3. active.py
+
+import multiprocessing
