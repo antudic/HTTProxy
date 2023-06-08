@@ -33,7 +33,7 @@ def createSQLiteTable() -> sqlite3.Cursor:
         "reliability": "INT DEFAULT 1"
     })
     return db.execute(query)
-breakpoint()
+
 
 def createReliabilityTrigger() -> None:
     """Create a trigger to automatically update the reliability parameter"""

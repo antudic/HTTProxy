@@ -2,6 +2,7 @@
 # Don't believe me? Check this out -> https://pastebin.com/p7rUYqM7
 
 import time 
+import sqlite3
 
 latency: float = 2.25 
 # highest acceptable latency in seconds
@@ -71,11 +72,14 @@ def updateLeniencyLoop() -> None:
     fallThrough = 10
     # how many leniency updates it should "spam" before resting for a little bit
 
+    db = sqlite3.connect("hot.db")
+    # we create our own instance here to allow for multiprocessing
+
     while True: 
         count = 0
 
-        while not updateLeniency() and count!=fallThrough:
-            # update leniencies until updateLeniency()  is happy or fallthrough is reached
+        while not updateLeniency(db) and count!=fallThrough:
+            # update leniencies until updateLeniency() is happy or fallthrough is reached
             count+=1
 
         time.sleep(0.5)
