@@ -30,12 +30,3 @@ def getProxy():
     except IndexError:
         PM.increaseLeniency()
         return getProxy()
-    
-
-def executeRequest(method: str, URL: str, data=None) -> requests.models.Response:
-    return requests.request(method, URL, data=data)
-
-
-
-def sendRequest(address, data=None):
-    query = "SELECT * FROM hot "
