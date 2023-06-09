@@ -31,7 +31,7 @@ def increaseLeniency() -> None:
 
 def decreaseLeniency() -> None:
     """Opposite of increaseLeniency()"""
-    # docstring short here on purpose, check increaseLatency()
+    # docstring short here on purpose to encourage people to read docs for increaseLatency()
 
     global latency, reliability
 
