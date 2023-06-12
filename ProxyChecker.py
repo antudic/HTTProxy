@@ -1,6 +1,7 @@
-import sqlite3
 import py2sqlite
 import requests
+import sqlite3
+import asyncio
 import time
 import re
 
@@ -59,6 +60,20 @@ def getProxyFromAddress(address: str):
     return db.execute(f"SELECT * FROM cold WHERE address={SQLstr(address)}").fetchone()
 
 
+def _catFactRequests():
+    """Only intended for internal use."""
+    # sends a catfact request using the requests library
+    # asyncio does not like this particularly much, but we do like it
+    return requests.get("https://catfact.ninja/fact", proxies={"http": proxy})
+
+
+async def _catFactHTTPX():
+    """Only intended for internal use."""
+    # sends a catfact request using the HTTPX library
+    # this is supposedly better but it's not built-in
+    async with httpx.AsyncClient() as client: await client.get('http://whatever.com')
+
+
 def checkProxy(proxy: str) -> float:
     """Check a proxy and return its latency"""
 
@@ -73,7 +88,8 @@ def checkProxy(proxy: str) -> float:
         requests.exceptions.ConnectionError,
         requests.exceptions.MissingSchema,
         requests.exceptions.InvalidURL,
-        requests.exceptions.ProxyError
+        requests.exceptions.ProxyError,
+        TypeError
         ) as e:
         raise InvalidProxyError(e)
     
@@ -116,6 +132,51 @@ def addProxy(proxy: str) -> None:
     query = py2sqlite.insert("cold", {"address": proxy, "latency": latency, "working": 1})
     db.execute(query)
     db.commit()
+
+
+async def addBulk(proxies: str):
+    """Tries its best to extract all proxies from a given string
+    
+    Finds any proxy as long as it follows the following pattern:
+    [some ip address, ex 0.0.0.0 or 255.255.255.255] [anything (including nothing)] [a 2 to 5 digit number]
+    Where [some ip address] can be anything from 0.0.0.0 to 255.255.255.255
+    [anything] can be 1 or more of any character (so a ":", " " or "  " would all work)
+    [a 2 to 5 digit number] a 2 to 5 digit number, this includes 00 and 99999
+
+    demo: https://pastebin.com/yBYrbVyS
+    """
+
+    try:
+        import httpx
+    except ModuleNotFoundError:
+        print("You need httpx library to bulk add proxies! do `pip install httpx`")
+
+    proxyPattern = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\s\S]?\d{2,5}")
+    anythingPattern = re.compile(r"[^.\d]")
+
+    rawProxies = re.findall(proxyPattern, proxies)
+    validProxies = [":".join(re.split(anythingPattern, rawProxy)) for rawProxy in rawProxies]
+
+    async def addProxyAsync(address):
+        try:
+            addProxy(address)
+            print("Successfully added proxy", address)
+            return 1
+
+        except Exception:
+            return 0
+
+    coros = [addProxyAsync(proxy) for proxy in validProxies]
+    results = await asyncio.gather(*coros)
+
+    print(f"Added {sum(results)} new proxies from list of {len(rawProxies)} proxies")
+
+
+async def addBulkFromFile(filename: str):
+    """Load text from file and run addBulk on the text"""
+    
+    with open(filename, "r", encoding="UTF-8") as file:
+        await addBulk(file.read())
 
 
 def recheckProxy(dbProxy: str, instance=None) -> bool:

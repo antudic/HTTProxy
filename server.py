@@ -67,34 +67,50 @@ def recver(sock: socket.socket):
 def interpreter(msg, client: socket.socket, db, loop: asyncio.AbstractEventLoop) -> None:
 
     address = ProxyManager.getProxy(db, loop)
+    print(address)
 
     try: 
         r = requests.get(msg, proxies={"http": address})
-        print("1")
-        client.sendall(r.text.encode())
+        client.send(r.text.encode())
         loop.call_soon(ProxyManager.proxySuccess(address, db))
-        print("6")
 
     except (
         requests.exceptions.ConnectionError,
         requests.exceptions.InvalidURL,
         requests.exceptions.ProxyError
         ) as e:
-        print("2")
         # any of these (could) indicate proxy error
-        loop.call_soon(ProxyManager.proxyError(address, db))
-        client.sendall(str(e).encode())
-        print("5")
+        try: 
+            ProxyManager.PC.checkProxy()
+            # ^ if it didn't throw an exception, it was user error
+            client.sendall(str(e).encode())
 
-    except requests.exceptions.MissingSchema:
-        print("3")
+        except Exception:
+            # if it did throw an error, it was proxy error and we try again
+            loop.call_soon(ProxyManager.proxyError(address, db)) # first we make sure to remove faulty proxy
+            interpreter(msg, client, db, loop) # then we call the function again
+
+    except (
+        requests.exceptions.MissingSchema,
+        TypeError
+        ) as e:
         # this indicates user error
         client.sendall(str(e).encode())
-        print("4")
 
 
 ProxyManager.loadProxies(verbose=True)
 print("Starting server...")
 sock = bind("127.0.0.1", 6969)
-accepter(sock)
+
+start_blocking = False
+
+def main():
+    if start_blocking:
+        accepter(sock)
+    else:
+        threading.Thread(target=accepter, args=(sock,)).start()
+
+if __name__ == "__main__":
+    main()
+
 print("Done.")

@@ -102,4 +102,3 @@ async def updateProxyLastUsed(address: str, instance=None):
 
     db.execute(f"UPDATE hot SET lastUsed={time.time()} WHERE address='{address}'")
     db.commit()
-    
