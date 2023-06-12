@@ -55,6 +55,10 @@ def createReliabilityTrigger() -> None:
     db.commit()
 
 
+def getProxyFromAddress(address: str):
+    return db.execute(f"SELECT * FROM cold WHERE address={SQLstr(address)}").fetchone()
+
+
 def checkProxy(proxy: str) -> float:
     """Check a proxy and return its latency"""
 
@@ -114,7 +118,7 @@ def addProxy(proxy: str) -> None:
     db.commit()
 
 
-def recheckProxy(dbProxy, instance=None) -> None:
+def recheckProxy(dbProxy: str, instance=None) -> bool:
     """Check if a proxy works and update its values"""
 
     # set db to be instance or global db
@@ -122,7 +126,7 @@ def recheckProxy(dbProxy, instance=None) -> None:
 
     # check proxy
     try:
-        latency = checkProxy(dbProxy)
+        latency = checkProxy(dbProxy[0])
         # ^ if we get past this, it works.
         
         lastUsed = int(time.time())
@@ -139,7 +143,7 @@ def recheckProxy(dbProxy, instance=None) -> None:
         # the proxy does not work
         query = py2sqlite.update(
             "cold", 
-            {"retries": dbProxy[4]+1, "fails": dbProxy[5]+1}, 
+            {"retries": dbProxy[4]+1, "fails": dbProxy[6]+1}, 
             {"address": SQLstr(dbProxy[0])}
             )
             
