@@ -8,10 +8,10 @@ import re
 db = sqlite3.connect("cold.db")
 pattern = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$")
 
-class InvalidProxyError(BaseException): pass
-class InvalidProxyDataError(BaseException): pass
-class TransparentProxyError(BaseException): pass
-class ProxyAlreadyExistsError(BaseException): pass
+class InvalidProxyError(Exception): pass
+class InvalidProxyDataError(Exception): pass
+class TransparentProxyError(Exception): pass
+class ProxyAlreadyExistsError(Exception): pass
 
 
 def SQLstr(value) -> str:
@@ -60,27 +60,28 @@ def getProxyFromAddress(address: str):
     return db.execute(f"SELECT * FROM cold WHERE address={SQLstr(address)}").fetchone()
 
 
-def _catFactRequests():
+async def _catFactRequests(proxy):
     """Only intended for internal use."""
     # sends a catfact request using the requests library
     # asyncio does not like this particularly much, but we do like it
     return requests.get("https://catfact.ninja/fact", proxies={"http": proxy})
 
 
-async def _catFactHTTPX():
+async def _catFactHTTPX(proxy):
     """Only intended for internal use."""
     # sends a catfact request using the HTTPX library
     # this is supposedly better but it's not built-in
-    async with httpx.AsyncClient() as client: await client.get('http://whatever.com')
+    async with httpx.AsyncClient() as client: 
+        await client.get('http://whatever.com', proxies={"http": proxy})
 
 
-def checkProxy(proxy: str) -> float:
+async def checkProxy(proxy: str, requestMethod=_catFactRequests) -> float:
     """Check a proxy and return its latency"""
 
     # send a request to reliable website
     try: 
         startTime = time.time()
-        r = requests.get("https://catfact.ninja/fact", proxies={"http": proxy})
+        r = await requestMethod(proxy)
         latency = time.time() - startTime
 
     # reject these errors, idk what to do about them
@@ -112,7 +113,7 @@ def checkProxy(proxy: str) -> float:
     return latency
 
 
-def addProxy(proxy: str) -> None:
+async def addProxy(proxy: str, requestMethod=_catFactRequests) -> None:
     """Add a proxy to the database"""
 
     # make sure the proxy is valid
@@ -126,7 +127,7 @@ def addProxy(proxy: str) -> None:
         raise ProxyAlreadyExistsError(f"Proxy \"{proxy}\" already exists!")
 
     # make sure the proxy is actually up and running
-    latency = checkProxy(proxy)
+    latency = await checkProxy(proxy, requestMethod)
 
     # everything looks good, we add it to the thing
     query = py2sqlite.insert("cold", {"address": proxy, "latency": latency, "working": 1})
@@ -147,9 +148,11 @@ async def addBulk(proxies: str):
     """
 
     try:
+        global httpx
         import httpx
     except ModuleNotFoundError:
         print("You need httpx library to bulk add proxies! do `pip install httpx`")
+        return
 
     proxyPattern = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\s\S]?\d{2,5}")
     anythingPattern = re.compile(r"[^.\d]")
@@ -157,29 +160,29 @@ async def addBulk(proxies: str):
     rawProxies = re.findall(proxyPattern, proxies)
     validProxies = [":".join(re.split(anythingPattern, rawProxy)) for rawProxy in rawProxies]
 
-    async def addProxyAsync(address):
+    async def addProxyWrapper(proxy):
         try:
-            addProxy(address)
-            print("Successfully added proxy", address)
+            await addProxy(proxy, _catFactHTTPX)
             return 1
-
-        except Exception:
+        
+        except Exception as e:
+            print(e)
             return 0
 
-    coros = [addProxyAsync(proxy) for proxy in validProxies]
+    coros = [asyncio.create_task(addProxyWrapper(proxy)) for proxy in validProxies]
     results = await asyncio.gather(*coros)
 
     print(f"Added {sum(results)} new proxies from list of {len(rawProxies)} proxies")
 
 
-async def addBulkFromFile(filename: str):
+def addBulkFromFile(filename: str):
     """Load text from file and run addBulk on the text"""
     
     with open(filename, "r", encoding="UTF-8") as file:
-        await addBulk(file.read())
+        asyncio.run(addBulk(file.read()))
 
 
-def recheckProxy(dbProxy: str, instance=None) -> bool:
+async def recheckProxy(dbProxy: str, instance=None) -> bool:
     """Check if a proxy works and update its values"""
 
     # set db to be instance or global db
@@ -187,7 +190,7 @@ def recheckProxy(dbProxy: str, instance=None) -> bool:
 
     # check proxy
     try:
-        latency = checkProxy(dbProxy[0])
+        latency = await checkProxy(dbProxy[0])
         # ^ if we get past this, it works.
         
         lastUsed = int(time.time())
@@ -251,7 +254,7 @@ def checkProxyLoop() -> None:
             proxies = db.execute(query).fetchall()
 
             for proxy in proxies:
-                recheckProxy(proxy, db)
+                asyncio.run(recheckProxy(proxy, db))
 
         db.commit()
         time.sleep(0.5)
