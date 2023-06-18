@@ -64,15 +64,15 @@ async def _catFactRequests(proxy):
     """Only intended for internal use."""
     # sends a catfact request using the requests library
     # asyncio does not like this particularly much, but we do like it
-    return requests.get("https://catfact.ninja/fact", proxies={"http": proxy})
+    return requests.get("http://catfact.ninja/fact", proxies={"http": proxy})
 
 
 async def _catFactHTTPX(proxy):
     """Only intended for internal use."""
     # sends a catfact request using the HTTPX library
     # this is supposedly better but it's not built-in
-    async with httpx.AsyncClient() as client: 
-        await client.get('http://whatever.com', proxies={"http": proxy})
+    async with httpx.AsyncClient(proxies={"http://": f"http://{proxy}"}) as client: 
+        return await client.get('http://catfact.ninja/fact', follow_redirects=True)
 
 
 async def checkProxy(proxy: str, requestMethod=_catFactRequests) -> float:
@@ -135,7 +135,14 @@ async def addProxy(proxy: str, requestMethod=_catFactRequests) -> None:
     db.commit()
 
 
-async def addBulk(proxies: str):
+def batch(_list, size):
+    """Divides list into batches of given size
+    
+    Ex: batch([1,2,3,4,5,6,7,8], 3) => [ [1,2,3], [4,5,6], [7,8] ]"""
+    return [_list[x*size:x*size+size] for x in range(int(len(_list)/size)+1)]
+
+
+async def addBulk(proxies: str, batchCount=100):
     """Tries its best to extract all proxies from a given string
     
     Finds any proxy as long as it follows the following pattern:
@@ -145,6 +152,9 @@ async def addBulk(proxies: str):
     [a 2 to 5 digit number] a 2 to 5 digit number, this includes 00 and 99999
 
     demo: https://pastebin.com/yBYrbVyS
+
+    `batchCount` indicates how many proxies to add in one "batch". This was added after
+    an attempt of adding >7000 proxies at once ended up taking over 5GB of memory
     """
 
     try:
@@ -153,6 +163,8 @@ async def addBulk(proxies: str):
     except ModuleNotFoundError:
         print("You need httpx library to bulk add proxies! do `pip install httpx`")
         return
+    
+    global batch
 
     proxyPattern = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[\s\S]?\d{2,5}")
     anythingPattern = re.compile(r"[^.\d]")
@@ -162,24 +174,33 @@ async def addBulk(proxies: str):
 
     async def addProxyWrapper(proxy):
         try:
-            await addProxy(proxy, _catFactHTTPX)
+            await addProxy(proxy, _catFactRequests)
+            print(f"Added {proxy}")
             return 1
         
         except Exception as e:
-            print(e)
             return 0
 
-    coros = [asyncio.create_task(addProxyWrapper(proxy)) for proxy in validProxies]
-    results = await asyncio.gather(*coros)
+    successes = 0
+    batches = batch(validProxies, batchCount)
+    print(f"Attempting to add {len(validProxies)} proxies in batches of {batchCount}")
+    startTime = time.time()
 
-    print(f"Added {sum(results)} new proxies from list of {len(rawProxies)} proxies")
+    for batchNum, batch in enumerate(batches):
+        coros = [asyncio.create_task(addProxyWrapper(proxy)) for proxy in batch]
+        results = await asyncio.gather(*coros)
+
+        successes+= sum(results)
+        print(f"Batch {batchNum+1}/{len(batches)} done.")
+
+    print(f"Added {successes} new proxies from list of {len(validProxies)} proxies in {time.time()-startTime} seconds")
 
 
-def addBulkFromFile(filename: str):
-    """Load text from file and run addBulk on the text"""
+def addBulkFromFile(filename: str, batchCount=100):
+    """Load text from file and run addBulk() on the text"""
     
     with open(filename, "r", encoding="UTF-8") as file:
-        asyncio.run(addBulk(file.read()))
+        asyncio.run(addBulk(file.read(), batchCount))
 
 
 async def recheckProxy(dbProxy: str, instance=None) -> bool:
